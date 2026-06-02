@@ -1,0 +1,430 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  AUTHOR
+  MODERATOR
+  USER
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  SCHEDULED
+  ARCHIVED
+}
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum NotificationType {
+  NEW_COMMENT
+  POST_PUBLISHED
+  NEW_FOLLOWER
+  NEWSLETTER_SUBSCRIPTION
+  SYSTEM_ALERT
+}
+
+// ============================================================================
+// USERS & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  username              String                 @unique
+  password              String?
+  name                  String?
+  bio                   String?
+  avatar                String?
+  role                  Role                   @default(USER)
+  isEmailVerified       Boolean                @default(false)
+  isBanned              Boolean                @default(false)
+  emailVerificationToken String?
+  passwordResetToken    String?
+  passwordResetExpires  DateTime?
+  twoFactorEnabled      Boolean                @default(false)
+  twoFactorSecret       String?
+  socialLinks           Json?                  // {twitter, github, linkedin, website}
+  preferences           Json?                  // {theme, notifications, etc}
+  lastLogin             DateTime?
+  loginAttempts         Int                    @default(0)
+  lockUntil             DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  // Relations
+  posts                 Post[]                 @relation("authorPosts")
+  comments              Comment[]              @relation("userComments")
+  bookmarks             Bookmark[]             @relation("userBookmarks")
+  readingHistory        ReadingHistory[]       @relation("userReadingHistory")
+  notifications         Notification[]         @relation("userNotifications")
+  followers             UserFollower[]         @relation("follower")
+  following             UserFollower[]         @relation("following")
+  newsletterSubscriptions NewsletterSubscription[] @relation("subscribedUser")
+  posts_edited          Post[]                 @relation("editorPosts")
+  comments_moderated    Comment[]              @relation("moderatorComments")
+
+  @@index([email])
+  @@index([username])
+  @@index([role])
+}
+
+model UserFollower {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+// ============================================================================
+// CONTENT MANAGEMENT
+// ============================================================================
+
+model Post {
+  id                  String          @id @default(cuid())
+  title               String
+  slug                String          @unique
+  excerpt             String?
+  content             String
+  contentHtml         String?
+  featuredImage       String?
+  featuredImageAlt    String?
+  status              PostStatus      @default(DRAFT)
+  publishedAt         DateTime?
+  scheduledAt         DateTime?
+  authorId            String
+  editorId            String?
+  seoTitle            String?
+  seoDescription      String?
+  seoKeywords         String?
+  canonicalUrl        String?
+  readingTime         Int             @default(0)
+  views               Int             @default(0)
+  likes               Int             @default(0)
+  readingLevel        String?         // Flesch-Kincaid grade level
+  tableOfContents     Json?           // [{id, level, title}]
+  isFeatured          Boolean         @default(false)
+  isPinned            Boolean         @default(false)
+  allowComments       Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  // Relations
+  author              User            @relation("authorPosts", fields: [authorId], references: [id], onDelete: Cascade)
+  editor              User?           @relation("editorPosts", fields: [editorId], references: [id], onDelete: SetNull)
+  categories          PostCategory[]  @relation("postCategories")
+  tags                PostTag[]       @relation("postTags")
+  comments            Comment[]       @relation("postComments")
+  bookmarks           Bookmark[]      @relation("postBookmarks")
+  readingHistory      ReadingHistory[] @relation("postReadingHistory")
+  media               Media[]         @relation("postMedia")
+  relatedPosts        RelatedPost[]   @relation("fromPost")
+  relatedPostsReverse RelatedPost[]   @relation("toPost")
+  analytics           PostAnalytics?  @relation("postAnalytics")
+
+  @@index([authorId])
+  @@index([status])
+  @@index([publishedAt])
+  @@index([slug])
+}
+
+model PostAnalytics {
+  id              String   @id @default(cuid())
+  postId          String   @unique
+  totalViews      Int      @default(0)
+  uniqueViews     Int      @default(0)
+  avgTimeOnPage   Float    @default(0)
+  bounceRate      Float    @default(0)
+  shareCount      Int      @default(0)
+  commentCount    Int      @default(0)
+  engagementScore Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  post            Post     @relation("postAnalytics", fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+model Category {
+  id              String          @id @default(cuid())
+  name            String          @unique
+  slug            String          @unique
+  description     String?
+  icon            String?
+  color           String?
+  seoTitle        String?
+  seoDescription  String?
+  order           Int             @default(0)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  posts           PostCategory[]  @relation("categoryPosts")
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model PostCategory {
+  id          String   @id @default(cuid())
+  postId      String
+  categoryId  String
+  createdAt   DateTime @default(now())
+
+  post        Post     @relation("postCategories", fields: [postId], references: [id], onDelete: Cascade)
+  category    Category @relation("categoryPosts", fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, categoryId])
+  @@index([postId])
+  @@index([categoryId])
+}
+
+model Tag {
+  id              String      @id @default(cuid())
+  name            String      @unique
+  slug            String      @unique
+  description     String?
+  color           String?
+  seoTitle        String?
+  seoDescription  String?
+  order           Int         @default(0)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  posts           PostTag[]   @relation("tagPosts")
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model PostTag {
+  id        String   @id @default(cuid())
+  postId    String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  post      Post     @relation("postTags", fields: [postId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation("tagPosts", fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+  @@index([postId])
+  @@index([tagId])
+}
+
+model RelatedPost {
+  id              String   @id @default(cuid())
+  fromPostId      String
+  toPostId        String
+  relevanceScore  Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  fromPost        Post     @relation("fromPost", fields: [fromPostId], references: [id], onDelete: Cascade)
+  toPost          Post     @relation("toPost", fields: [toPostId], references: [id], onDelete: Cascade)
+
+  @@unique([fromPostId, toPostId])
+  @@index([fromPostId])
+  @@index([toPostId])
+}
+
+// ============================================================================
+// COMMENTS & ENGAGEMENT
+// ============================================================================
+
+model Comment {
+  id            String          @id @default(cuid())
+  content       String
+  postId        String
+  userId        String
+  parentId      String?
+  status        CommentStatus   @default(PENDING)
+  moderatorId   String?
+  moderatorNote String?
+  likes         Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Relations
+  post          Post            @relation("postComments", fields: [postId], references: [id], onDelete: Cascade)
+  user          User            @relation("userComments", fields: [userId], references: [id], onDelete: Cascade)
+  parent        Comment?        @relation("commentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       Comment[]       @relation("commentReplies")
+  moderator     User?           @relation("moderatorComments", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@index([userId])
+  @@index([status])
+  @@index([parentId])
+}
+
+// ============================================================================
+// USER INTERACTIONS
+// ============================================================================
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation("userBookmarks", fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation("postBookmarks", fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
+
+model ReadingHistory {
+  id            String   @id @default(cuid())
+  userId        String
+  postId        String
+  readingTime   Int      @default(0) // in seconds
+  scrollPercent Float    @default(0)
+  isCompleted   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation("userReadingHistory", fields: [userId], references: [id], onDelete: Cascade)
+  post          Post     @relation("postReadingHistory", fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
+
+// ============================================================================
+// MEDIA & FILES
+// ============================================================================
+
+model Media {
+  id          String   @id @default(cuid())
+  postId      String?
+  filename    String
+  mimetype    String
+  size        Int
+  url         String
+  alt         String?
+  caption     String?
+  uploadedBy  String
+  width       Int?
+  height      Int?
+  format      String?  // webp, jpg, png, pdf, etc
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  post        Post?    @relation("postMedia", fields: [postId], references: [id], onDelete: SetNull)
+  uploader    User?    @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@index([uploadedBy])
+}
+
+// ============================================================================
+// NEWSLETTER & NOTIFICATIONS
+// ============================================================================
+
+model NewsletterSubscription {
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  userId              String?
+  isActive            Boolean  @default(true)
+  frequency           String   @default("weekly") // daily, weekly, monthly
+  verificationToken   String?
+  isEmailVerified     Boolean  @default(false)
+  unsubscribeToken    String   @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User?    @relation("subscribedUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([isActive])
+}
+
+model Notification {
+  id            String           @id @default(cuid())
+  userId        String
+  type          NotificationType
+  title         String
+  message       String
+  link          String?
+  isRead        Boolean          @default(false)
+  metadata      Json?            // Additional data specific to notification type
+  createdAt     DateTime         @default(now())
+  readAt        DateTime?
+
+  user          User             @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// SYSTEM & CONFIGURATION
+// ============================================================================
+
+model SiteSettings {
+  id                  String   @id @default(cuid())
+  siteName            String
+  siteDescription     String?
+  logo                String?
+  favicon             String?
+  primaryColor        String   @default("#000000")
+  secondaryColor      String   @default("#ffffff")
+  googleAnalyticsId   String?
+  enableComments      Boolean  @default(true)
+  enableNewsletter    Boolean  @default(true)
+  enableAnalytics     Boolean  @default(true)
+  maintenanceMode     Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  changes   Json?    // Track what changed
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
