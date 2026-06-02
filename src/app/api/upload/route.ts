@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -38,26 +37,13 @@ export async function POST(request: NextRequest) {
     // TODO: Upload to cloud storage (e.g., AWS S3, Cloudinary)
     const fileUrl = `/uploads/${uuidv4()}-${file.name}`;
 
-    // Save file metadata to database
-    const media = await prisma.media.create({
-      data: {
-        filename: file.name,
-        mimetype: file.type,
-        size: file.size,
-        url: fileUrl,
-        uploadedBy: 'user-id', // Should come from session
-        format: file.type.split('/')[1],
-      },
-    });
-
     return NextResponse.json(
       {
         success: true,
         message: 'File uploaded successfully',
         data: {
-          id: media.id,
-          url: media.url,
-          filename: media.filename,
+          url: fileUrl,
+          filename: file.name,
         },
       },
       { status: 201 }
